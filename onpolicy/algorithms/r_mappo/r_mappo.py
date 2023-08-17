@@ -4,6 +4,8 @@ import torch.nn as nn
 from onpolicy.utils.util import get_gard_norm, huber_loss, mse_loss
 from onpolicy.utils.valuenorm import ValueNorm
 from onpolicy.algorithms.utils.util import check
+from stable_baselines3.common.utils import explained_variance
+
 
 class R_MAPPO():
     """
@@ -186,10 +188,10 @@ class R_MAPPO():
 
         train_info['value_loss'] = 0
         train_info['policy_loss'] = 0
-        train_info['dist_entropy'] = 0
-        train_info['actor_grad_norm'] = 0
-        train_info['critic_grad_norm'] = 0
-        train_info['ratio'] = 0
+        # train_info['dist_entropy'] = 0
+        # train_info['actor_grad_norm'] = 0
+        # train_info['critic_grad_norm'] = 0
+        # train_info['ratio'] = 0
 
         for _ in range(self.ppo_epoch):
             if self._use_recurrent_policy:
@@ -206,10 +208,18 @@ class R_MAPPO():
 
                 train_info['value_loss'] += value_loss.item()
                 train_info['policy_loss'] += policy_loss.item()
-                train_info['dist_entropy'] += dist_entropy.item()
-                train_info['actor_grad_norm'] += actor_grad_norm
-                train_info['critic_grad_norm'] += critic_grad_norm
-                train_info['ratio'] += imp_weights.mean()
+                # train_info['dist_entropy'] += dist_entropy.item()
+                # train_info['actor_grad_norm'] += actor_grad_norm
+                # train_info['critic_grad_norm'] += critic_grad_norm
+                # train_info['ratio'] += imp_weights.mean()
+
+                if self._use_popart or self._use_valuenorm:
+                    explained_var = explained_variance(
+                        self.value_normalizer.denormalize(buffer.value_preds[:-1]).flatten(),
+                        buffer.returns[:-1].flatten())
+                else:
+                    explained_var = explained_variance(buffer.value_preds.flatten(), buffer.returns.flatten())
+                train_info['explained_variance'] = explained_var
 
         num_updates = self.ppo_epoch * self.num_mini_batch
 

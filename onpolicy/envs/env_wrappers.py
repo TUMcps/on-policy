@@ -6,6 +6,11 @@ import torch
 from multiprocessing import Process, Pipe
 from abc import ABC, abstractmethod
 from onpolicy.utils.util import tile_images
+from typing import Optional, Sequence, Union, List, Any, Iterable
+import gymnasium as gym
+
+VecEnvIndices = Union[None, int, Iterable[int]]
+
 
 class CloudpickleWrapper(object):
     """
@@ -43,6 +48,8 @@ class ShareVecEnv(ABC):
         self.observation_space = observation_space
         self.share_observation_space = share_observation_space
         self.action_space = action_space
+        # seeds to be used in the next call to env.reset()
+        self._seeds: List[Optional[int]] = [None for _ in range(num_envs)]
 
     @abstractmethod
     def reset(self):
@@ -117,6 +124,26 @@ class ShareVecEnv(ABC):
         else:
             raise NotImplementedError
 
+    def seed(self, seed: Optional[int] = None) -> Sequence[Union[None, int]]:
+        """
+        Sets the random seeds for all environments, based on a given seed.
+        Each individual environment will still get its own seed, by incrementing the given seed.
+        WARNING: since gym 0.26, those seeds will only be passed to the environment
+        at the next reset
+        .
+        :param seed: The random seed. May be None for completely random seeding.
+
+        :return: Returns a list containing the seeds for each individual env.
+            Note that all list elements may be None, if the env does not return anything when being seeded.
+        """
+        if seed is None:
+            # To ensure that subprocesses have different seeds,
+            # we still populate the seed variable when no argument is passed
+            seed = np.random.randint(0, 2 ** 32 - 1)
+
+        self._seeds = [seed + idx for idx in range(self.num_envs)]
+        return self._seeds
+
     def get_images(self):
         """
         Return RGB images from each environment
@@ -135,6 +162,12 @@ class ShareVecEnv(ABC):
             from gym.envs.classic_control import rendering
             self.viewer = rendering.SimpleImageViewer()
         return self.viewer
+
+    def _reset_seeds(self) -> None:
+        """
+        Reset the seeds that are going to be used at the next reset.
+        """
+        self._seeds = [None for _ in range(self.num_envs)]
 
 
 def worker(remote, parent_remote, env_fn_wrapper):
@@ -666,12 +699,23 @@ class DummyVecEnv(ShareVecEnv):
             env_fns), env.observation_space, env.share_observation_space, env.action_space)
         self.actions = None
 
+    @property
+    def unwrapped(self):
+        return self.envs[0]
+
     def step_async(self, actions):
         self.actions = actions
 
     def step_wait(self):
-        results = [env.step(a) for (a, env) in zip(self.actions, self.envs)]
-        obs, rews, dones, infos = map(np.array, zip(*results))
+        # taking care of the fact that we only have one env and one set of actions
+        # original:  results = [env.step(a) for (a, env) in zip(self.actions, self.envs)]
+        results = [self.envs[0].step(self.actions)]
+
+        def to_numpy_array(x):
+            return np.array(x, dtype=object)
+
+        # ignoring the truncated variable of the gymnasium API returned by our Wrapper.
+        obs, rews, dones, _, infos = map(to_numpy_array, zip(*results))
 
         for (i, done) in enumerate(dones):
             if 'bool' in done.__class__.__name__:
@@ -685,8 +729,10 @@ class DummyVecEnv(ShareVecEnv):
         return obs, rews, dones, infos
 
     def reset(self):
-        obs = [env.reset() for env in self.envs]
-        return np.array(obs)
+        obs = [env.reset(seed=self._seeds[env_idx]) for env_idx, env in enumerate(self.envs)]
+        # Seeds are only used once
+        self._reset_seeds()
+        return np.array(obs, dtype=object)
 
     def close(self):
         for env in self.envs:
@@ -701,6 +747,37 @@ class DummyVecEnv(ShareVecEnv):
         else:
             raise NotImplementedError
 
+    def get_attr(self, attr_name: str, indices: VecEnvIndices = None) -> List[Any]:
+        """Return attribute from vectorized environment (see base class)."""
+        target_envs = self._get_target_envs(indices)
+        return [getattr(env_i, attr_name) for env_i in target_envs]
+
+    def set_attr(self, attr_name: str, value: Any, indices: VecEnvIndices = None) -> None:
+        """Set attribute inside vectorized environments (see base class)."""
+        target_envs = self._get_target_envs(indices)
+        for env_i in target_envs:
+            setattr(env_i, attr_name, value)
+
+    def env_method(self, method_name: str, *method_args, indices: VecEnvIndices = None, **method_kwargs) -> List[Any]:
+        """Call instance methods of vectorized environments."""
+        target_envs = self._get_target_envs(indices)
+        return [getattr(env_i, method_name)(*method_args, **method_kwargs) for env_i in target_envs]
+
+    def _get_target_envs(self, indices: VecEnvIndices) -> List[gym.Env]:
+        indices = self._get_indices(indices)
+        return [self.envs[i] for i in indices]
+
+    def _get_indices(self, indices: VecEnvIndices) -> Iterable[int]:
+        """
+        Convert a flexibly-typed reference to environment indices to an implied list of indices.
+        :param indices: refers to indices of envs.
+        :return: the implied list of indices.
+        """
+        if indices is None:
+            indices = range(self.num_envs)
+        elif isinstance(indices, int):
+            indices = [indices]
+        return indices
 
 
 class ShareDummyVecEnv(ShareVecEnv):
