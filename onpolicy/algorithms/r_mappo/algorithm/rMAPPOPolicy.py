@@ -1,6 +1,7 @@
 import torch
 from onpolicy.algorithms.r_mappo.algorithm.r_actor_critic import R_Actor, R_Critic
 from onpolicy.utils.util import update_linear_schedule
+import numpy as np
 
 
 class R_MAPPOPolicy:
@@ -69,7 +70,9 @@ class R_MAPPOPolicy:
                                                                  masks,
                                                                  available_actions,
                                                                  deterministic)
-
+        # Actions could be on arbitrary scale, so clip the actions to avoid
+        # out of bound error (e.g. if sampling from a Gaussian distribution)
+        actions = np.clip(actions, self.act_space.low, self.act_space.high)  # type: ignore[assignment, arg-type]
         values, rnn_states_critic = self.critic(cent_obs, rnn_states_critic, masks)
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic
 
