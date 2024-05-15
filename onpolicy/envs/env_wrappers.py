@@ -1,13 +1,14 @@
 """
 Modified from OpenAI Baselines code to work with multi-agent envs
 """
+from abc import ABC, abstractmethod
+from multiprocessing import Pipe, Process
+from typing import Any, Iterable, List, Optional, Sequence, Union
+
+import gymnasium as gym
 import numpy as np
 import torch
-from multiprocessing import Process, Pipe
-from abc import ABC, abstractmethod
 from onpolicy.utils.util import tile_images
-from typing import Optional, Sequence, Union, List, Any, Iterable
-import gymnasium as gym
 
 VecEnvIndices = Union[None, int, Iterable[int]]
 
@@ -720,19 +721,23 @@ class DummyVecEnv(ShareVecEnv):
         for (i, done) in enumerate(dones):
             if 'bool' in done.__class__.__name__:
                 if done:
-                    obs[i] = self.envs[i].reset()
+                    obs[i], reset_info = self.envs[i].reset()
             else:
                 if np.all(done):
-                    obs[i] = self.envs[i].reset()
+                    obs[i], reset_info = self.envs[i].reset()
 
         self.actions = None
         return obs, rews, dones, infos
 
     def reset(self):
-        obs = [env.reset(seed=self._seeds[env_idx]) for env_idx, env in enumerate(self.envs)]
+        all_obs = [[] for _ in range(self.num_envs)]
+        reset_infos = [{} for _ in range(self.num_envs)]
+        for env_idx in range(self.num_envs):
+            all_obs[env_idx], reset_infos[env_idx] = self.envs[env_idx].reset(seed=self._seeds[env_idx])
+        #obs = [env.reset(seed=self._seeds[env_idx])[0] for env_idx, env in enumerate(self.envs)]
         # Seeds are only used once
         self._reset_seeds()
-        return np.array(obs, dtype=object)
+        return np.array(all_obs, dtype=object), reset_infos
 
     def close(self):
         for env in self.envs:
