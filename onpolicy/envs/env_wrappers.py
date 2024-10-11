@@ -697,7 +697,7 @@ class DummyVecEnv(ShareVecEnv):
         self.envs = [fn() for fn in env_fns]
         env = self.envs[0]
         ShareVecEnv.__init__(self, len(
-            env_fns), env.observation_space, env.share_observation_space, env.action_space)
+            env_fns), env.observation_space, env.get_wrapper_attr("share_observation_space"), env.action_space)
         self.actions = None
 
     @property
