@@ -715,8 +715,9 @@ class DummyVecEnv(ShareVecEnv):
         def to_numpy_array(x):
             return np.array(x, dtype=object)
 
-        # ignoring the truncated variable of the gymnasium API returned by our Wrapper.
-        obs, rews, dones, _, infos = map(to_numpy_array, zip(*results))
+        obs, rews, dones, truncated, infos = map(to_numpy_array, zip(*results))
+
+        dones = dones or truncated
 
         for (i, done) in enumerate(dones):
             if 'bool' in done.__class__.__name__:
