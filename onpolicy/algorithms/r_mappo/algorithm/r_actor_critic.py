@@ -28,6 +28,7 @@ class R_Actor(nn.Module):
         self._use_recurrent_policy = args.use_recurrent_policy
         self._recurrent_N = args.recurrent_N
         self._log_std_init = args.log_std_init
+        self._manipulated_bias = args.manipulated_bias
         self.tpdv = dict(dtype=torch.float32, device=device)
 
         obs_shape = get_shape_from_obs_space(obs_space)
@@ -37,7 +38,7 @@ class R_Actor(nn.Module):
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             self.rnn = RNNLayer(self.hidden_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
 
-        self.act = ACTLayer(action_space, self.hidden_size, self._use_orthogonal, self._gain, self._log_std_init)
+        self.act = ACTLayer(action_space, self.hidden_size, self._use_orthogonal, self._gain, self._log_std_init, self._manipulated_bias)
 
         self.to(device)
 
